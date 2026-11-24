@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Лина • Монтажная студия (Telegram)</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:#120b1f; --panel:#1d1233; --panel2:#2a1a4a; --text:#f2eefc; --muted:#a99cc7;
+  --accent:#e2467f; --accent2:#a05cf0; --border:#332253; --sel:#3a2160; --input:#160d28;
+}
+body.light{
+  --bg:#f5f2fb; --panel:#ffffff; --panel2:#efe9fa; --text:#241a3a; --muted:#6c608a;
+  --border:#ddd2f0; --sel:#e9defc; --input:#f4effc;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0;}
+body{background:var(--bg); color:var(--text); font:15px/1.45 -apple-system,'Segoe UI',Roboto,sans-serif; padding-bottom:24px;}
+header{position:sticky; top:0; z-index:5; background:var(--bg); padding:10px 14px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; border-bottom:1px solid var(--border);}
+.brand{font-weight:700; font-size:17px; margin-right:auto;}
+.brand span{color:var(--accent); font-weight:400;}
+main{max-width:980px; margin:0 auto; padding:12px 14px; display:grid; gap:14px;}
+@media(min-width:820px){ main{grid-template-columns:380px 1fr; align-items:start;} .preview{position:sticky; top:66px;} }
+.preview,.panels>section{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:12px; margin-bottom:12px;}
+canvas{width:100%; border-radius:10px; background:#000; display:block;}
+.pv-controls{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+.pv-timer{margin-top:8px; color:var(--muted); font-variant-numeric:tabular-nums;}
+#pbar{height:8px; background:var(--panel2); border-radius:4px; margin-top:6px; cursor:pointer; overflow:hidden;}
+#pfill{height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent2));}
+button{background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:9px 12px; font-size:14px; cursor:pointer;}
+button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; color:#fff; font-weight:600;}
+button.small{padding:5px 9px; font-size:13px;}
+button:disabled{opacity:.5; cursor:default;}
+details{background:var(--panel); border:1px solid var(--border); border-radius:14px; margin-bottom:12px; overflow:hidden;}
+summary{padding:12px; font-weight:600; cursor:pointer; list-style:none;}
+summary::before{content:'▸ '; color:var(--accent);}
+details[open] summary::before{content:'▾ ';}
+details>div{padding:0 12px 12px;}
+input[type=text],input[type=number],select,textarea{width:100%; background:var(--input); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:14px; font-family:inherit;}
+textarea{min-height:90px; resize:vertical;}
+label{display:block; font-size:13px; color:var(--muted); margin:8px 0 4px;}
+.row{display:flex; gap:8px;}
+.row>label{flex:1;}
+.mitem{display:flex; align-items:center; gap:10px; padding:8px; border:1px solid var(--border); border-radius:10px; margin-top:8px; cursor:pointer;}
+.mitem.sel{border-color:var(--accent); background:var(--sel);}
+.mitem .micon{font-size:20px;}
+.mitem .minfo{flex:1; min-width:0;}
+.mitem .mname{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:14px;}
+.mitem .mmeta{font-size:12px; color:var(--muted);}
+.mitem button{padding:4px 8px;}
+.card{border:1px solid var(--border); border-radius:10px; padding:10px; margin-top:10px;}
+.card.sel{border-color:var(--accent);}
+.card-top{display:flex; justify-content:space-between; margin-bottom:4px;}
+.card-top span{color:var(--muted); font-size:13px;}
+.card-actions{display:flex; gap:8px; margin-top:8px;}
+#timeline{display:flex; height:30px; border-radius:8px; overflow:hidden; gap:2px; margin:10px 0 4px; background:var(--panel2);}
+#timeline .seg{background:linear-gradient(135deg,var(--accent),var(--accent2)); opacity:.55; cursor:pointer; min-width:5px;}
+#timeline .seg.sel{opacity:1; outline:2px solid #fff; outline-offset:-2px;}
+.hint{font-size:12px; color:var(--muted); margin-top:6px;}
+footer{max-width:980px; margin:0 auto; padding:0 14px 12px; font-size:12px; color:var(--muted); text-align:center;}
+.badge{display:inline-block; background:var(--panel2); border:1px solid var(--border); border-radius:6px; padding:1px 7px; font-size:11px; color:var(--muted); margin-left:6px;}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Лина <span>• Монтажная студия</span><span class="badge">TG BETA</span></div>
+  <select id="orient" style="width:auto">
+    <option value="9:16">720 × 1280 (вертикально)</option>
+    <option value="16:9">1280 × 720 (горизонтально)</option>
+  </select>
+  <button id="btnSave">Сохранить проект</button>
+  <button id="btnOpen">Открыть проект</button>
+</header>
+<input type="file" id="openProj" accept=".json" hidden>
+
+<main>
+  <section class="preview">
+    <canvas id="cv"></canvas>
+    <div class="pv-controls">
+      <button id="btnPlay" class="primary">▶ Предпросмотр</button>
+      <button id="btnStop">■ Стоп</button>
+      <button id="btnFrame" class="small">Кадр PNG</button>
+      <button id="btnExport" class="primary">Экспорт видео</button>
+    </div>
+    <div class="pv-timer"><span id="tcur">0:00</span> / <span id="ttot">0:00</span></div>
+    <div id="pbar"><div id="pfill"></div></div>
+    <div class="hint">Экспорт идёт в реальном времени: не сворачивайте Telegram и не блокируйте экран.</div>
+  </section>
+
+  <section class="panels">
+    <details open>
+      <summary>Медиатека</summary>
+      <div>
+        <button id="btnAdd" class="primary">+ Добавить фото и видео</button>
+        <input type="file" id="fileMedia" accept="image/*,video/*" multiple hidden>
+        <div id="mediaList"></div>
+        <div class="hint">Нажмите на файл, чтобы выбрать его для новой сцены.</div>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Сцены и таймлайн</summary>
+      <div>
+        <button id="btnAddScene">+ Сцена из выбранного файла</button>
+        <div id="timeline"></div>
+        <div id="sceneList"></div>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Субтитры</summary>
+      <div>
+        <input type="file" id="fileSrt" accept=".srt,.txt" hidden>
+        <button id="btnSrtLoad" class="small">Загрузить SRT-файл</button>
+        <label>Или вставьте текст субтитров (формат SRT)</label>
+        <textarea id="srtText" placeholder="1&#10;00:00:01,000 --> 00:00:04,000&#10;Привет, это Лина!"></textarea>
+        <div class="pv-controls">
+          <button id="btnSrtApply" class="primary small">Применить субтитры</button>
+          <button id="btnSrtClear" class="small">Убрать субтитры</button>
+          <span id="srtCount" class="hint"></span>
+        </div>
+        <div class="hint">Распознавания речи нет — нужен готовый SRT.</div>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Звук</summary>
+      <div>
+        <input type="file" id="fileMusic" accept="audio/*" hidden>
+        <button id="btnMusicAdd" class="small">Добавить музыку</button>
+        <div id="musicInfo" class="hint"></div>
+        <label>Громкость: <span id="volVal">70</span>%</label>
+        <input type="range" id="vol" min="0" max="100" value="70" style="width:100%">
+      </div>
+    </details>
+  </section>
+</main>
+
+<footer>Работает локально в вашем устройстве. Файлы не отправляются на сервер. Автораспознавание речи и ИИ-генерация не включены. Проекты с личными исходниками храните осторожно.</footer>
+
+<script>
+'use strict';
+var $ = function(s){ return document.querySelector(s); };
+var tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+
+/* ---------- Telegram ---------- */
+if (tg) {
+  try { tg.ready(); tg.expand(); } catch(e) {}
+  try { tg.setHeaderColor('#120b1f'); tg.setBackgroundColor('#120b1f'); } catch(e) {}
+  if (tg.MainButton) {
+    try { tg.MainButton.setParams({ text: 'Экспорт видео', color: '#e2467f', text_color: '#ffffff', is_visible: false }); } catch(e) {}
+    tg.MainButton.onClick(function(){ exportVideo(); });
+  }
+  if (tg.colorScheme === 'light') document.body.classList.add('light');
+}
+function haptic(kind){ if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.impactOccurred(kind || 'light'); } catch(e) {} } }
+function notify(msg){ if (tg && tg.showAlert) { try { tg.showAlert(msg); return; } catch(e) {} } alert(msg); }
+
+/* ---------- State ---------- */
+var uid = 1;
+function nid(){ return 'n' + (uid++); }
+var state = { media: [], scenes: [], subs: [], music: null, orient: '9:16', selectedMedia: null, selectedScene: null };
+var playing = false, exporting = false, tcur = 0, lastTs = 0, rafId = 0, recorder = null, chunks = [], activeVideoEl = null, musicElRef = null;
+var actx = null, msDest = null;
+
+var cv = $('#cv'), ctx = cv.getContext('2d');
+
+/* ---------- Helpers ---------- */
+function fmt(x){ x = Math.max(0, x || 0); var m = Math.floor(x / 60), s = Math.floor(x % 60); return m + ':' + String(s).padStart(2, '0'); }
+function esc(s){ return String(s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+function mediaById(id){ return state.media.find(function(m){ return m.id === id; }); }
+function sceneDur(s){ return Math.max(0.05, (s.end - s.start) / s.speed); }
+function totalDur(){ return state.scenes.reduce(function(a, s){ return a + sceneDur(s); }, 0); }
+function sceneAt(t){ var off = 0; for (var i = 0; i < state.scenes.length; i++) { var s = state.scenes[i], d = sceneDur(s); if (t < off + d) return { s: s, off: off }; off += d; } return null; }
+function download(blob, name){ var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 5000); }
+function blobToDataURL(blob){ return new Promise(function(res, rej){ var r = new FileReader(); r.onload = function(){ res(r.result); }; r.onerror = rej; r.readAsDataURL(blob); }); }
+function dataURLtoBlob(d){ var p = d.indexOf(','); var meta = d.slice(0, p), body = d.slice(p + 1); var mime = (meta.match(/data:([^;]+)/) || [])[1] || 'application/octet-stream'; var bin = atob(body); var arr = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return new Blob([arr], { type: mime }); }
+
+/* ---------- Canvas ---------- */
+function dims(){ return state.orient === '16:9' ? { w: 1280, h: 720 } : { w: 720, h: 1280 }; }
+function applyOrient(){ var d = dims(); cv.width = d.w; cv.height = d.h; drawFrame(tcur); }
+
+function drawCover(el){
+  var cw = cv.width, ch = cv.height;
+  var w = el.videoWidth || el.naturalWidth || 0, h = el.videoHeight || el.naturalHeight || 0;
+  if (!w || !h) { drawPlaceholder(); return; }
+  var s = Math.max(cw / w, ch / h), dw = w * s, dh = h * s;
+  try { ctx.drawImage(el, (cw - dw) / 2, (ch - dh) / 2, dw, dh); } catch(e) { drawPlaceholder(); }
+}
+function drawPlaceholder(){
+  var cw = cv.width, ch = cv.height;
+  ctx.fillStyle = '#171026'; ctx.fillRect(0, 0, cw, ch);
+  ctx.fillStyle = '#8b7fa8'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = Math.round(cw * 0.045) + 'px sans-serif';
+  ctx.fillText('Кадр недоступен', cw / 2, ch / 2);
+}
+function wrapText(text, maxW){
+  var words = String(text).split(/\s+/), lines = [], cur = '';
+  for (var i = 0; i < words.length; i++) {
+    var t = cur ? cur + ' ' + words[i] : words[i];
+    if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = words[i]; } else cur = t;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+function drawTitle(text){
+  var cw = cv.width, ch = cv.height, size = Math.round(cw * 0.062);
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = 'bold ' + size + 'px sans-serif';
+  ctx.shadowColor = 'rgba(0,0,0,.75)'; ctx.shadowBlur = Math.round(cw * 0.02);
+  ctx.fillStyle = '#fff';
+  var lines = wrapText(text, cw * 0.86), lh = size * 1.22, y = ch * 0.07;
+  for (var i = 0; i < lines.length; i++) { ctx.fillText(lines[i], cw / 2, y); y += lh; }
+  ctx.restore();
+}
+function drawSubs(text){
+  var cw = cv.width, ch = cv.height, size = Math.round(cw * 0.048);
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = size + 'px sans-serif';
+  ctx.shadowColor = 'rgba(0,0,0,.85)'; ctx.shadowBlur = Math.round(cw * 0.018);
+  ctx.fillStyle = '#fff';
+  var lines = wrapText(text, cw * 0.88), lh = size * 1.25;
+  var y = ch * 0.88 - lines.length * lh;
+  for (var i = 0; i < lines.length; i++) { ctx.fillText(lines[i], cw / 2, y); y += lh; }
+  ctx.restore();
+}
+
+/* ---------- Video sync ---------- */
+function syncVideo(m, local, s){
+  var el = m.el;
+  if (activeVideoEl && activeVideoEl !== el && !activeVideoEl.paused) activeVideoEl.pause();
+  activeVideoEl = el;
+  el.playbackRate = Math.min(4, Math.max(0.1, s.speed));
+  try { el.preservesPitch = true; el.mozPreservesPitch = true; el.webkitPreservesPitch = true; } catch(e) {}
+  if (Math.abs(el.currentTime - local) > 0.25) { try { el.currentTime = local; } catch(e) {} }
+  var want = (playing || exporting);
+  if (want) { if (el.paused) { var p = el.play(); if (p && p.catch) p.catch(function(){}); } }
+  else if (!el.paused) el.pause();
+}
+
+/* ---------- Frame render ---------- */
+function drawFrame(t){
+  var cw = cv.width, ch = cv.height;
+  ctx.fillStyle = '#0b0714'; ctx.fillRect(0, 0, cw, ch);
+  var hit = sceneAt(t);
+  if (!hit) {
+    ctx.fillStyle = '#8b7fa8'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = Math.round(cw * 0.045) + 'px sans-serif';
+    ctx.fillText('Добавьте сцену из медиатеки', cw / 2, ch / 2);
+    return;
+  }
+  var s = hit.s, off = hit.off, local = s.start + (t - off) * s.speed;
+  var m = mediaById(s.mediaId);
+  if (m && !m.broken && m.el) {
+    if (m.type === 'video') { syncVideo(m, local, s); if (m.el.readyState >= 2) drawCover(m.el); else drawPlaceholder(); }
+    else { drawCover(m.el); }
+  } else drawPlaceholder();
+  var tt = t - off;
+  if (s.title && tt >= 0 && tt < 2.5) drawTitle(s.title);
+  for (var i = 0; i < state.subs.length; i++) {
+    var x = state.subs[i];
+    if (t >= x.start && t < x.end) { drawSubs(x.text); break; }
+  }
+}
+
+/* ---------- Audio graph (для экспорта) ---------- */
+function ensureAudioGraph(){
+  if (actx) return actx;
+  try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+  try { msDest = actx.createMediaStreamDestination(); } catch(e) { msDest = null; }
+  return actx;
+}
+function routeEl(el){
+  if (!actx || !msDest) return;
+  if (!el.__routed) {
+    try {
+      el.__routed = true;
+      var src = actx.createMediaElementSource(el);
+      src.connect(msDest);
+      src.connect(actx.destination);
+    } catch(e) { el.__routed = false; }
+  }
+}
+
+/* ---------- Playback ---------- */
+function startPlayback(){
+  if (exporting) return;
+  var T = totalDur();
+  if (!T) { notify('Добавьте хотя бы одну сцену'); return; }
+  if (tcur >= T - 0.01) tcur = 0;
+  playing = true; lastTs = 0;
+  ensureAudioGraph();
+  if (actx && actx.state === 'suspended') { try { actx.resume(); } catch(e) {} }
+  if (musicElRef) { routeEl(musicElRef); musicElRef.currentTime = tcur % Math.max(0.1, musicElRef.duration || 1); var p = musicElRef.play(); if (p && p.catch) p.catch(function(){}); }
+  rafId = requestAnimationFrame(loop);
+  refreshUI();
+}
+function stopPlayback(){
+  playing = false;
+  if (rafId) cancelAnimationFrame(rafId); rafId = 0;
+  state.media.forEach(function(m){ if (m.type === 'video' && !m.el.paused) m.el.pause(); });
+  if (musicElRef) musicElRef.pause();
+  activeVideoEl = null;
+  refreshUI();
+}
+function loop(ts){
+  if (!playing && !exporting) return;
+  var dt = lastTs ? (ts - lastTs) / 1000 : 0; lastTs = ts;
+  var T = totalDur();
+  tcur += dt;
+  if (tcur >= T) {
+    tcur = T; drawFrame(T); updateTimer();
+    if (exporting) stopExport(true); else stopPlayback();
+    return;
+  }
+  drawFrame(tcur); updateTimer();
+  rafId = requestAnimationFrame(loop);
+}
+function updateTimer(){
+  $('#tcur').textContent = fmt(tcur);
+  var T = totalDur() || 1;
+  $('#pfill').style.width = (tcur / T * 100) + '%';
+  if (exporting && tg && tg.MainButton) { try { tg.MainButton.setText('Экспорт… ' + Math.round(tcur / T * 100) + '%'); } catch(e) {} }
+}
+
+/* ---------- Export ---------- */
+function pickMime(){
+  if (!window.MediaRecorder) return null;
+  var c = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  for (var i = 0; i < c.length; i++) { try { if (MediaRecorder.isTypeSupported(c[i])) return c[i]; } catch(e) {} }
+  return null;
+}
+function exportVideo(){
+  if (exporting) return;
+  if (!state.scenes.length) { notify('Добавьте хотя бы одну сцену'); return; }
+  if (!cv.captureStream || !window.MediaRecorder) { notify('Этот браузер не поддерживает запись видео'); return; }
+  stopPlayback();
+  ensureAudioGraph();
+  if (actx && actx.state === 'suspended') { try { actx.resume(); } catch(e) {} }
+  var stream = cv.captureStream(30);
+  if (msDest) {
+    msDest.stream.getAudioTracks().forEach(function(tr){ stream.addTrack(tr); });
+    if (musicElRef) routeEl(musicElRef);
+    state.media.forEach(function(m){ if (m.type === 'video') routeEl(m.el); });
+  }
+  var mime = pickMime();
+  if (!mime) { notify('Запись не поддерживается этим браузером'); return; }
+  chunks = [];
+  try { recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 }); }
+  catch(e) { notify('Не удалось запустить запись: ' + e.message); return; }
+  recorder.ondataavailable = function(e){ if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = onExportDone;
+  exporting = true; tcur = 0; lastTs = 0;
+  if (musicElRef) { musicElRef.currentTime = 0; var p = musicElRef.play(); if (p && p.catch) p.catch(function(){}); }
+  recorder.start(500);
+  haptic('medium');
+  refreshUI();
+  rafId = requestAnimationFrame(loop);
+}
+function stopExport(save){
+  if (!exporting) return;
+  exporting = false;
+  if (rafId) cancelAnimationFrame(rafId); rafId = 0;
+  state.media.forEach(function(m){ if (m.type === 'video' && !m.el.paused) m.el.pause(); });
+  if (musicElRef) musicElRef.pause();
+  activeVideoEl = null;
+  if (save && recorder && recorder.state !== 'inactive') recorder.stop();
+  else if (recorder && recorder.state !== 'inactive') { recorder.onstop = null; recorder.stop(); }
+  if (!save) { chunks = []; refreshUI(); }
+}
+function onExportDone(){
+  var type = chunks.length ? chunks[0].type : 'video/webm';
+  var blob = new Blob(chunks, { type: type });
+  chunks = [];
+  var ext = blob.type.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+  download(blob, 'lina-' + Date.now() + '.' + ext);
+  if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.notificationOccurred('success'); } catch(e) {} }
+  notify('Готово! Видео скачано (' + ext.toUpperCase() + ').');
+  refreshUI();
+}
+
+/* ---------- SRT ---------- */
+function parseSRT(text){
+  var out = [];
+  var blocks = String(text).replace(/\r/g, '').trim().split(/\n\s*\n/);
+  var tc = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/;
+  for (var i = 0; i < blocks.length; i++) {
+    var lines = blocks[i].split('\n');
+    var li = -1;
+    for (var j = 0; j < lines.length; j++) { if (tc.test(lines[j])) { li = j; break; } }
+    if (li < 0) continue;
+    var m = lines[li].match(tc);
+    var s = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000;
+    var e = (+m[5]) * 3600 + (+m[6]) * 60 + (+m[7]) + (+m[8]) / 1000;
+    var txt = lines.slice(li + 1).join('\n').trim();
+    if (txt) out.push({ start: s, end: e, text: txt });
+  }
+  return out;
+}
+function srtBlock(s, i){
+  function tc(x){
+    var h = Math.floor(x / 3600), m = Math.floor((x % 3600) / 60), sec = Math.floor(x % 60), ms = Math.round((x - Math.floor(x)) * 1000);
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0') + ',' + String(ms).padStart(3, '0');
+  }
+  return (i + 1) + '\n' + tc(s.start) + ' --> ' + tc(s.end) + '\n' + s.text;
+}
+
+/* ---------- Render UI ---------- */
+function speedOpts(sel){
+  var v = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4], out = '';
+  if (v.indexOf(sel) < 0) v.push(sel);
+  v.sort(function(a, b){ return a - b; });
+  for (var i = 0; i < v.length; i++) out += '<option value="' + v[i] + '"' + (v[i] === sel ? ' selected' : '') + '>' + v[i] + '×</option>';
+  return out;
+}
+function renderMedia(){
+  var el = $('#mediaList');
+  if (!state.media.length) { el.innerHTML = '<div class="hint">Пока пусто — добавьте фото или видео.</div>'; return; }
+  el.innerHTML = state.media.map(function(m){
+    var meta = (m.type === 'video' ? '🎬 видео, ' : '🖼 фото, ') + (m.size / 1048576).toFixed(1) + ' МБ' + (m.type === 'video' ? ', ' + (m.duration || 0).toFixed(1) + ' с' : '');
+    if (m.broken) meta += ' · не открылся';
+    return '<div class="mitem' + (m.id === state.selectedMedia ? ' sel' : '') + '" data-mid="' + m.id + '">' +
+      '<div class="micon">' + (m.type === 'video' ? '🎬' : '🖼') + '</div>' +
+      '<div class="minfo"><div class="mname">' + esc(m.name) + '</div><div class="mmeta">' + esc(meta) + '</div></div>' +
+      '<button data-del="1">✕</button></div>';
+  }).join('');
+}
+function renderTimeline(){
+  var T = totalDur(), el = $('#timeline');
+  if (!T) { el.innerHTML = '<div class="hint" style="padding:6px 8px">Таймлайн пуст.</div>'; return; }
+  el.innerHTML = state.scenes.map(function(s, i){
+    var w = (sceneDur(s) / T * 100).toFixed(2);
+    return '<div class="seg' + (s.id === state.selectedScene ? ' sel' : '') + '" style="width:' + w + '%" data-sid="' + s.id + '" title="Сцена ' + (i + 1) + '"></div>';
+  }).join('');
+}
+function renderScenes(){
+  var el = $('#sceneList');
+  if (!state.scenes.length) { el.innerHTML = '<div class="hint">Сцен нет. Выберите файл в медиатеке и нажмите «+ Сцена».</div>'; return; }
+  el.innerHTML = state.scenes.map(function(s, i){
+    var opts = state.media.map(function(m){ return '<option value="' + m.id + '"' + (m.id === s.mediaId ? ' selected' : '') + '>' + esc(m.name) + '</option>'; }).join('');
+    if (!opts) opts = '<option value="">— нет файлов —</option>';
+    return '<div class="card' + (s.id === state.selectedScene ? ' sel' : '') + '" data-sid="' + s.id + '">' +
+      '<div class="card-top"><b>Сцена ' + (i + 1) + '</b><span>' + sceneDur(s).toFixed(1) + ' с на выходе</span></div>' +
+      '<label>Источник</label><select data-k="mediaId">' + opts + '</select>' +
+      '<div class="row">' +
+        '<label>Начало, с<input type="number" step="0.1" min="0" data-k="start" value="' + s.start + '"></label>' +
+        '<label>Конец, с<input type="number" step="0.1" min="0" data-k="end" value="' + s.end + '"></label>' +
+        '<label>Скорость<select data-k="speed">' + speedOpts(s.speed) + '</select></label>' +
+      '</div>' +
+      '<label>Заголовок (первые 2,5 с)</label><input type="text" data-k="title" value="' + esc(s.title || '') + '" placeholder="Например: Вы устаёте не от дел…">' +
+      '<div class="card-actions"><button data-act="up" class="small">↑</button><button data-act="down" class="small">↓</button><button data-act="del" class="small">✕ Удалить</button></div>' +
+    '</div>';
+  }).join('');
+}
+function refreshMainButton(){
+  if (!tg || !tg.MainButton) return;
+  try {
+    if (exporting) { tg.MainButton.show(); }
+    else if (state.scenes.length) { tg.MainButton.setText('Экспорт видео'); tg.MainButton.show(); }
+    else tg.MainButton.hide();
+  } catch(e) {}
+}
+function refreshUI(){
+  renderMedia(); renderTimeline(); renderScenes();
+  $('#ttot').textContent = fmt(totalDur());
+  $('#srtCount').textContent = state.subs.length ? state.subs.length + ' субтитров' : '';
+  $('#musicInfo').textContent = state.music ? ('🎵 ' + state.music.name) : 'Музыка не добавлена';
+  if (!exporting) updateTimer();
+  refreshMainButton();
+}
+
+/* ---------- Events: медиа ---------- */
+$('#btnAdd').addEventListener('click', function(){ $('#fileMedia').click(); });
+$('#fileMedia').addEventListener('change', function(e){
+  var files = Array.prototype.slice.call(e.target.files || []);
+  var pending = files.map(function(f){
+    var url = URL.createObjectURL(f);
+    var isVid = f.type.indexOf('video') === 0;
+    var item = { id: nid(), name: f.name, type: isVid ? 'video' : 'image', size: f.size, url: url, duration: 0, el: null, broken: false };
+    if (isVid) {
+      var v = document.createElement('video');
+      v.src = url; v.preload = 'auto'; v.playsInline = true;
+      item.el = v;
+      return new Promise(function(res){
+        v.onloadedmetadata = function(){ item.duration = v.duration || 0; res(); };
+        v.onerror = function(){ item.broken = true; res(); };
+        setTimeout(res, 4000);
+      }).then(function(){ return item; });
+    } else {
+      var im = new Image(); im.src = url; item.el = im;
+      return new Promise(function(res){ im.onload = function(){ res(); }; im.onerror = function(){ item.broken = true; res(); }; setTimeout(res, 3000); }).then(function(){ return item; });
+    }
+  });
+  Promise.all(pending).then(function(items){
+    items.forEach(function(it){ state.media.push(it); });
+    refreshUI(); haptic('light');
+  });
+  e.target.value = '';
+});
+$('#mediaList').addEventListener('click', function(e){
+  var it = e.target.closest('.mitem'); if (!it) return;
+  var m = mediaById(it.dataset.mid); if (!m) return;
+  if (e.target.dataset.del) {
+    state.media = state.media.filter(function(x){ return x.id !== m.id; });
+    state.scenes = state.scenes.filter(function(s){ return s.mediaId !== m.id; });
+    if (state.selectedMedia === m.id) state.selectedMedia = null;
+    refreshUI(); return;
+  }
+  state.selectedMedia = m.id; refreshUI();
+});
+
+/* ---------- Events: сцены ---------- */
+$('#btnAddScene').addEventListener('click', function(){
+  var m = mediaById(state.selectedMedia);
+  if (!m) { notify('Сначала выберите файл в медиатеке'); return; }
+  var end = m.type === 'video' ? Math.min(m.duration || 5, 5) : 4;
+  var s = { id: nid(), mediaId: m.id, start: 0, end: end || 4, speed: 1, title: '' };
+  state.scenes.push(s); state.selectedScene = s.id;
+  refreshUI(); haptic('light');
+});
+$('#sceneList').addEventListener('change', function(e){
+  var card = e.target.closest('.card'); if (!card) return;
+  var s = state.scenes.find(function(x){ return x.id === card.dataset.sid; }); if (!s) return;
+  var k = e.target.dataset.k; if (!k) return;
+  if (k === 'mediaId') s.mediaId = e.target.value;
+  else if (k === 'start' || k === 'end') {
+    var v = parseFloat(e.target.value);
+    if (!isNaN(v)) s[k] = Math.max(0, v);
+    if (s.end <= s.start) s.end = s.start + 0.5;
+  }
+  else if (k === 'speed') s.speed = parseFloat(e.target.value) || 1;
+  else if (k === 'title') s.title = e.target.value;
+  refreshUI();
+});
+$('#sceneList').addEventListener('click', function(e){
+  var card = e.target.closest('.card'); if (!card) return;
+  var s = state.scenes.find(function(x){ return x.id === card.dataset.sid; }); if (!s) return;
+  var act = e.target.dataset.act;
+  if (!act) { state.selectedScene = s.id; refreshUI(); return; }
+  var i = state.scenes.indexOf(s);
+  if (act === 'up' && i > 0) { state.scenes.splice(i, 1); state.scenes.splice(i - 1, 0, s); }
+  else if (act === 'down' && i < state.scenes.length - 1) { state.scenes.splice(i, 1); state.scenes.splice(i + 1, 0, s); }
+  else if (act === 'del') { state.scenes.splice(i, 1); if (state.selectedScene === s.id) state.selectedScene = null; }
+  refreshUI();
+});
+$('#timeline').addEventListener('click', function(e){
+  var seg = e.target.closest('.seg'); if (!seg) return;
+  state.selectedScene = seg.dataset.sid; refreshUI();
+});
+
+/* ---------- Events: субтитры ---------- */
+$('#btnSrtLoad').addEventListener('click', function(){ $('#fileSrt').click(); });
+$('#fileSrt').addEventListener('change', function(e){
+  var f = e.target.files && e.target.files[0]; if (!f) return;
+  f.text().then(function(t){ $('#srtText').value = t; applySrt(); });
+  e.target.value = '';
+});
+function applySrt(){
+  var subs = parseSRT($('#srtText').value);
+  if (!subs.length) { notify('Не нашла ни одного субтитра. Проверьте формат SRT.'); return; }
+  state.subs = subs; refreshUI();
+  if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.notificationOccurred('success'); } catch(e) {} }
+}
+$('#btnSrtApply').addEventListener('click', applySrt);
+$('#btnSrtClear').addEventListener('click', function(){ state.subs = []; $('#srtText').value = ''; refreshUI(); });
+
+/* ---------- Events: звук ---------- */
+$('#btnMusicAdd').addEventListener('click', function(){ $('#fileMusic').click(); });
+$('#fileMusic').addEventListener('change', function(e){
+  var f = e.target.files && e.target.files[0]; if (!f) return;
+  var url = URL.createObjectURL(f);
+  var a = new Audio(url); a.loop = true; a.preload = 'auto';
+  musicElRef = a;
+  state.music = { name: f.name, volume: (+$('#vol').value) / 100, data: null, file: f };
+  a.volume = state.music.volume;
+  refreshUI();
+  e.target.value = '';
+});
+$('#vol').addEventListener('input', function(){
+  var v = (+this.value) / 100;
+  $('#volVal').textContent = this.value;
+  if (musicElRef) musicElRef.volume = v;
+  if (state.music) state.music.volume = v;
+});
+
+/* ---------- Events: предпросмотр ---------- */
+$('#btnPlay').addEventListener('click', startPlayback);
+$('#btnStop').addEventListener('click', function(){ if (exporting) stopExport(true); else stopPlayback(); });
+$('#btnFrame').addEventListener('click', function(){
+  drawFrame(tcur);
+  cv.toBlob(function(b){ if (b) download(b, 'lina-frame-' + Date.now() + '.png'); });
+});
+$('#pbar').addEventListener('click', function(e){
+  if (exporting) return;
+  var r = this.getBoundingClientRect();
+  tcur = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * totalDur();
+  drawFrame(tcur); updateTimer();
+});
+
+/* ---------- Events: экспорт и проект ---------- */
+$('#btnExport').addEventListener('click', exportVideo);
+$('#orient').addEventListener('change', function(){ state.orient = this.value; applyOrient(); });
+$('#btnSave').addEventListener('click', function(){
+  var bytes = state.media.reduce(function(a, m){ return a + (m.size || 0); }, 0);
+  if (bytes > 190 * 1048576) notify('Внимание: исходники больше ~190 МБ, проект может не сохраниться. Не закрывайте вкладку!');
+  var mediaPromises = state.media.map(function(m){
+    return fetch(m.url).then(function(r){ return r.blob(); }).then(blobToDataURL).then(function(data){
+      return { id: m.id, name: m.name, type: m.type, size: m.size, duration: m.duration, data: data };
+    }).catch(function(){ return { id: m.id, name: m.name, type: m.type, size: m.size, duration: m.duration, data: null }; });
+  });
+  var musicPromise = Promise.resolve(null);
+  if (state.music) {
+    musicPromise = (state.music.file ? Promise.resolve(state.music.file) : fetch(state.music.url).then(function(r){ return r.blob(); }))
+      .then(blobToDataURL)
+      .then(function(data){ return { name: state.music.name, volume: state.music.volume, data: data }; })
+      .catch(function(){ return { name: state.music.name, volume: state.music.volume, data: null }; });
+  }
+  Promise.all([Promise.all(mediaPromises), musicPromise]).then(function(r){
+    var proj = {
+      app: 'lina-studio', v: 1, orient: state.orient,
+      scenes: state.scenes.map(function(s){ return { id: s.id, mediaId: s.mediaId, start: s.start, end: s.end, speed: s.speed, title: s.title }; }),
+      subs: state.subs,
+      music: r[1],
+      media: r[0]
+    };
+    download(new Blob([JSON.stringify(proj)], { type: 'application/json' }), 'lina-project-' + Date.now() + '.json');
+    notify('Проект сохранён. Не закрывайте вкладку до конца скачивания!');
+  }).catch(function(){ notify('Не удалось собрать проект'); });
+});
+$('#btnOpen').addEventListener('click', function(){ $('#openProj').click(); });
+$('#openProj').addEventListener('change', function(e){
+  var f = e.target.files && e.target.files[0]; if (!f) return;
+  f.text().then(function(txt){
+    var proj;
+    try { proj = JSON.parse(txt); } catch(err) { notify('Не удалось открыть проект: ' + err.message); return; }
+    if (proj.app !== 'lina-studio') { notify('Это не файл проекта Лины'); return; }
+    stopPlayback();
+    state.media = []; state.scenes = []; state.subs = []; state.music = null; musicElRef = null;
+    state.selectedMedia = null; state.selectedScene = null;
+    state.orient = proj.orient || '9:16';
+    var mediaPromises = (proj.media || []).map(function(md){
+      var p = Promise.resolve(null);
+      if (md.data) {
+        p = new Promise(function(res){
+          var blob = dataURLtoBlob(md.data), url = URL.createObjectURL(blob);
+          if (md.type === 'video') {
+            var v = document.createElement('video'); v.src = url; v.preload = 'auto'; v.playsInline = true;
+            v.onloadedmetadata = function(){ res({ el: v, url: url, dur: v.duration || 0 }); };
+            v.onerror = function(){ res({ el: null, url: url, dur: 0 }); };
+            setTimeout(function(){ res({ el: v, url: url, dur: v.duration || 0 }); }, 4000);
+          } else {
+            var im = new Image(); im.src = url;
+            im.onload = function(){ res({ el: im, url: url, dur: 0 }); };
+            im.onerror = function(){ res({ el: null, url: url, dur: 0 }); };
+            setTimeout(function(){ res({ el: im, url: url, dur: 0 }); }, 3000);
+          }
+        });
+      }
+      return p.then(function(r){
+        return { id: md.id || nid(), name: md.name, type: md.type, size: md.size || 0, duration: md.duration || (r && r.dur) || 0, url: r ? r.url : '', el: r ? r.el : null, broken: !(r && r.el) };
+      });
+    });
+    return Promise.all(mediaPromises).then(function(meds){
+      state.media = meds;
+      state.scenes = (proj.scenes || []).map(function(s){ return { id: s.id || nid(), mediaId: s.mediaId, start: s.start || 0, end: s.end || 4, speed: s.speed || 1, title: s.title || '' }; });
+      state.subs = proj.subs || [];
+      if (proj.music) {
+        state.music = { name: proj.music.name, volume: proj.music.volume != null ? proj.music.volume : 0.7, file: null, url: null };
+        if (proj.music.data) {
+          var mb = dataURLtoBlob(proj.music.data), murl = URL.createObjectURL(mb);
+          var a = new Audio(murl); a.loop = true; a.volume = state.music.volume;
+          musicElRef = a; state.music.url = murl;
+        }
+      }
+      $('#srtText').value = state.subs.map(function(s, i){ return srtBlock(s, i); }).join('\n\n');
+      $('#vol').value = Math.round((state.music ? state.music.volume : 0.7) * 100);
+      $('#volVal').textContent = $('#vol').value;
+      Array.prototype.forEach.call($('#orient').options, function(o){ if (o.value === state.orient) o.selected = true; });
+      applyOrient(); refreshUI();
+      notify('Проект открыт');
+    });
+  }).catch(function(err){ notify('Не удалось открыть проект: ' + err.message); }).then(function(){ e.target.value = ''; });
+});
+
+/* ---------- Init ---------- */
+applyOrient();
+refreshUI();
+updateTimer();
+</script>
+</body>
+</html>
