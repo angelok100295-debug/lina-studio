@@ -117,6 +117,8 @@ footer{max-width:980px; margin:0 auto; padding:0 14px 12px; font-size:12px; colo
       <summary>Субтитры</summary>
       <div>
         <input type="file" id="fileSrt" accept=".srt,.txt" hidden>
+        <button id="btnAutoSubs" class="primary small">Распознать речь</button>
+        <div id="autoSubsStatus" class="hint" role="status"></div>
         <button id="btnSrtLoad" class="small">Загрузить SRT-файл</button>
         <label>Или вставьте текст субтитров (формат SRT)</label>
         <textarea id="srtText" placeholder="1&#10;00:00:01,000 --> 00:00:04,000&#10;Привет, это Лина!"></textarea>
@@ -125,7 +127,7 @@ footer{max-width:980px; margin:0 auto; padding:0 14px 12px; font-size:12px; colo
           <button id="btnSrtClear" class="small">Убрать субтитры</button>
           <span id="srtCount" class="hint"></span>
         </div>
-        <div class="hint">Распознавания речи нет — нужен готовый SRT.</div>
+        <div class="hint">Добавьте видео на таймлайн. При первом распознавании потребуется интернет для загрузки модели.</div>
       </div>
     </details>
 
@@ -142,7 +144,7 @@ footer{max-width:980px; margin:0 auto; padding:0 14px 12px; font-size:12px; colo
   </section>
 </main>
 
-<footer>Работает локально в вашем устройстве. Файлы не отправляются на сервер. Автораспознавание речи и ИИ-генерация не включены. Проекты с личными исходниками храните осторожно.</footer>
+<footer>Работает локально в вашем устройстве. Файлы не отправляются на сервер. Для автосубтитров модель скачивается отдельно и обрабатывает аудио на устройстве. Проекты с личными исходниками храните осторожно.</footer>
 
 <script>
 'use strict';
@@ -618,6 +620,107 @@ $('#timeline').addEventListener('click', function(e){
 });
 
 /* ---------- Events: субтитры ---------- */
+var recognizerPromise;
+function loadRecognizer(){
+  if (!recognizerPromise) {
+    recognizerPromise = import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2')
+      .then(function(lib){
+        lib.env.backends.onnx.wasm.numThreads = 1;
+        return lib.pipeline('automatic-speech-recognition', 'onnx-community/whisper-tiny', {
+          device: 'wasm', dtype: 'q8'
+        });
+      }).catch(function(err){
+        recognizerPromise = null;
+        throw err;
+      });
+  }
+  return recognizerPromise;
+}
+function sceneAudio(buffer, scene){
+  var start = Math.min(buffer.length, Math.round(scene.start * buffer.sampleRate));
+  var end = Math.min(buffer.length, Math.round(scene.end * buffer.sampleRate));
+  var mono = new Float32Array(Math.max(0, end - start));
+  for (var channel = 0; channel < buffer.numberOfChannels; channel++) {
+    var samples = buffer.getChannelData(channel);
+    for (var i = 0; i < mono.length; i++) mono[i] += samples[start + i] / buffer.numberOfChannels;
+  }
+  return mono;
+}
+function appendRecognizedCues(cues, chunks, scene, offset, audioDuration){
+  var limit = Math.min(audioDuration, scene.end - scene.start);
+  (chunks || []).forEach(function(chunk){
+    if (!chunk.timestamp || !Number.isFinite(chunk.timestamp[0])) return;
+    var start = Math.max(0, chunk.timestamp[0]);
+    var end = Math.min(limit, chunk.timestamp[1] == null ? limit : chunk.timestamp[1]);
+    var text = String(chunk.text || '').trim();
+    if (text && end > start) cues.push({ start: offset + start / scene.speed, end: offset + end / scene.speed, text: text });
+  });
+}
+$('#btnAutoSubs').addEventListener('click', async function(){
+  var button = this, status = $('#autoSubsStatus');
+  if (exporting || finishingExport) { status.textContent = 'Дождитесь окончания экспорта.'; return; }
+  var snapshot = JSON.stringify(state.scenes);
+  var originalDraft = $('#srtText').value;
+  var offset = 0;
+  var clips = state.scenes.flatMap(function(scene){
+    var media = mediaById(scene.mediaId);
+    var startOnTimeline = offset;
+    offset += sceneDur(scene);
+    return media && media.type === 'video' && !media.broken && media.url
+      ? [{ scene: Object.assign({}, scene), media: media, offset: startOnTimeline }] : [];
+  });
+  if (!clips.length) { status.textContent = 'Добавьте на таймлайн видео с речью.'; return; }
+  var OfflineContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OfflineContext) { status.textContent = 'Этот браузер не может извлечь звук из видео.'; return; }
+  stopPlayback();
+  button.disabled = true;
+  try {
+    var context = new OfflineContext(1, 1, 16000);
+    var cues = [], decoded = null, decodedMedia = null, recognize = null;
+    for (var i = 0; i < clips.length; i++) {
+      var clip = clips[i];
+      status.textContent = 'Читаю звук сцены ' + (i + 1) + ' из ' + clips.length + '…';
+      if (decodedMedia !== clip.media) {
+        try {
+          var response = await fetch(clip.media.url);
+          if (!response.ok) throw new Error('Видео недоступно');
+          decoded = await context.decodeAudioData(await response.arrayBuffer());
+          decodedMedia = clip.media;
+        } catch(err) {
+          throw new Error('Не удалось прочитать звук из «' + clip.media.name + '». Попробуйте MP4 со звуком.');
+        }
+      }
+      var samples = sceneAudio(decoded, clip.scene);
+      if (!samples.length) continue;
+      if (!recognize) {
+        status.textContent = 'Загружаю модель распознавания…';
+        try { recognize = await loadRecognizer(); }
+        catch(err) { throw new Error('Не удалось загрузить модель. Проверьте интернет и попробуйте снова.'); }
+      }
+      status.textContent = 'Распознаю речь: сцена ' + (i + 1) + ' из ' + clips.length + '…';
+      var result = await recognize(samples, { return_timestamps: true, chunk_length_s: 25, stride_length_s: 4, task: 'transcribe' });
+      appendRecognizedCues(cues, result.chunks, clip.scene, clip.offset, samples.length / decoded.sampleRate);
+    }
+    if (!cues.length) { status.textContent = 'В видеосценах не удалось распознать речь.'; return; }
+    if (snapshot !== JSON.stringify(state.scenes) || originalDraft !== $('#srtText').value || exporting || finishingExport) {
+      status.textContent = 'Проект изменился. Запустите распознавание ещё раз.';
+      return;
+    }
+    if (originalDraft.trim() && !window.confirm('Заменить текущие субтитры распознанным текстом?')) {
+      status.textContent = 'Текущие субтитры сохранены.';
+      return;
+    }
+    $('#srtText').value = cues.map(srtBlock).join('\n\n');
+    applySrt();
+    status.textContent = 'Субтитры готовы. Текст можно исправить и нажать «Применить субтитры».';
+  } catch(err) {
+    status.textContent = err.message || 'Не удалось распознать речь.';
+  } finally {
+    button.disabled = false;
+  }
+});
+
+
 $('#btnSrtLoad').addEventListener('click', function(){ $('#fileSrt').click(); });
 $('#fileSrt').addEventListener('change', function(e){
   var f = e.target.files && e.target.files[0]; if (!f) return;
