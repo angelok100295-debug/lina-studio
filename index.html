@@ -82,6 +82,9 @@ footer{max-width:980px; margin:0 auto; padding:0 14px 12px; font-size:12px; colo
       <button id="btnStop">■ Стоп</button>
       <button id="btnFrame" class="small">Кадр PNG</button>
       <button id="btnExport" class="primary">Экспорт видео</button>
+      <button id="btnShareExport" class="primary" hidden>Сохранить видео</button>
+      <button id="btnDownloadExport" hidden>Скачать файл</button>
+      <span id="exportStatus" class="hint" role="status"></span>
     </div>
     <div class="pv-timer"><span id="tcur">0:00</span> / <span id="ttot">0:00</span></div>
     <div id="pbar"><div id="pfill"></div></div>
@@ -161,7 +164,7 @@ function notify(msg){ if (tg && tg.showAlert) { try { tg.showAlert(msg); return;
 var uid = 1;
 function nid(){ return 'n' + (uid++); }
 var state = { media: [], scenes: [], subs: [], music: null, orient: '9:16', selectedMedia: null, selectedScene: null };
-var playing = false, exporting = false, tcur = 0, lastTs = 0, rafId = 0, recorder = null, chunks = [], activeVideoEl = null, musicElRef = null;
+var playing = false, exporting = false, finishingExport = false, tcur = 0, lastTs = 0, rafId = 0, recorder = null, chunks = [], activeVideoEl = null, musicElRef = null;
 var actx = null, msDest = null;
 
 var cv = $('#cv'), ctx = cv.getContext('2d');
@@ -334,7 +337,7 @@ function pickMime(){
   return null;
 }
 function exportVideo(){
-  if (exporting) return;
+  if (exporting || finishingExport) return;
   if (!state.scenes.length) { notify('Добавьте хотя бы одну сцену'); return; }
   if (!cv.captureStream || !window.MediaRecorder) { notify('Этот браузер не поддерживает запись видео'); return; }
   stopPlayback();
@@ -355,7 +358,12 @@ function exportVideo(){
   recorder.onstop = onExportDone;
   exporting = true; tcur = 0; lastTs = 0;
   if (musicElRef) { musicElRef.currentTime = 0; var p = musicElRef.play(); if (p && p.catch) p.catch(function(){}); }
-  recorder.start(500);
+  try { recorder.start(500); } catch(e) {
+    stopExport(false);
+    notify('Не удалось запустить запись: ' + e.message);
+    return;
+  }
+  $('#exportStatus').textContent = 'Идёт запись…';
   haptic('medium');
   refreshUI();
   rafId = requestAnimationFrame(loop);
@@ -367,18 +375,46 @@ function stopExport(save){
   state.media.forEach(function(m){ if (m.type === 'video' && !m.el.paused) m.el.pause(); });
   if (musicElRef) musicElRef.pause();
   activeVideoEl = null;
-  if (save && recorder && recorder.state !== 'inactive') recorder.stop();
+  if (save && recorder && recorder.state !== 'inactive') {
+    finishingExport = true;
+    $('#exportStatus').textContent = 'Подготовка файла…';
+    recorder.stop();
+  }
   else if (recorder && recorder.state !== 'inactive') { recorder.onstop = null; recorder.stop(); }
   if (!save) { chunks = []; refreshUI(); }
 }
+var exportedFile = null;
+function shareExport(){
+  var data = { files: [exportedFile] };
+  navigator.share(data).catch(function(err){
+    if (err.name !== 'AbortError') $('#exportStatus').textContent = 'Меню сохранения недоступно. Нажмите «Скачать файл».';
+  });
+}
+$('#btnShareExport').addEventListener('click', shareExport);
+$('#btnDownloadExport').addEventListener('click', function(){
+  if (exportedFile) download(exportedFile, exportedFile.name);
+});
 function onExportDone(){
-  var type = chunks.length ? chunks[0].type : 'video/webm';
+  finishingExport = false;
+  var type = recorder.mimeType || (chunks[0] && chunks[0].type) || 'video/webm';
   var blob = new Blob(chunks, { type: type });
   chunks = [];
   var ext = blob.type.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
-  download(blob, 'lina-' + Date.now() + '.' + ext);
+  if (!blob.size) {
+    $('#exportStatus').textContent = 'Запись завершилась без видео. Попробуйте снова.';
+    refreshUI();
+    return;
+  }
+  exportedFile = new File([blob], 'lina-' + Date.now() + '.' + ext, { type: ext === 'mp4' ? 'video/mp4' : 'video/webm' });
+  var canShareFile = false;
+  try { canShareFile = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [exportedFile] })); } catch(e) {}
+  $('#btnShareExport').hidden = !canShareFile;
+  $('#btnDownloadExport').hidden = false;
+  $('#exportStatus').textContent = canShareFile
+    ? 'Видео готово. Нажмите «Сохранить видео» и выберите действие в меню iPhone.'
+    : 'Видео готово. Нажмите «Скачать файл» и проверьте папку загрузок.';
   if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.notificationOccurred('success'); } catch(e) {} }
-  notify('Готово! Видео скачано (' + ext.toUpperCase() + ').');
+  $('#exportStatus').scrollIntoView({ block: 'nearest' });
   refreshUI();
 }
 
