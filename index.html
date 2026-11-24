@@ -69,7 +69,8 @@ footer{max-width:980px; margin:0 auto; padding:0 14px 12px; font-size:12px; colo
     <option value="9:16">720 × 1280 (вертикально)</option>
     <option value="16:9">1280 × 720 (горизонтально)</option>
   </select>
-  <button id="btnSave">Сохранить проект</button>
+  <button id="btnSave">Подготовить проект JSON</button>
+  <button id="btnSaveJson" hidden>Получить проект JSON</button>
   <button id="btnOpen">Открыть проект</button>
 </header>
 <input type="file" id="openProj" accept=".json" hidden>
@@ -85,6 +86,7 @@ footer{max-width:980px; margin:0 auto; padding:0 14px 12px; font-size:12px; colo
       <button id="btnShareExport" class="primary" hidden>Сохранить видео</button>
       <button id="btnDownloadExport" hidden>Скачать файл</button>
       <span id="exportStatus" class="hint" role="status"></span>
+      <video id="exportPreview" controls playsinline hidden style="width:100%;max-height:45vh"></video>
     </div>
     <div class="pv-timer"><span id="tcur">0:00</span> / <span id="ttot">0:00</span></div>
     <div id="pbar"><div id="pfill"></div></div>
@@ -176,7 +178,7 @@ function mediaById(id){ return state.media.find(function(m){ return m.id === id;
 function sceneDur(s){ return Math.max(0.05, (s.end - s.start) / s.speed); }
 function totalDur(){ return state.scenes.reduce(function(a, s){ return a + sceneDur(s); }, 0); }
 function sceneAt(t){ var off = 0; for (var i = 0; i < state.scenes.length; i++) { var s = state.scenes[i], d = sceneDur(s); if (t < off + d) return { s: s, off: off }; off += d; } return null; }
-function download(blob, name){ var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 5000); }
+function download(blob, name){ var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 5000); }
 function blobToDataURL(blob){ return new Promise(function(res, rej){ var r = new FileReader(); r.onload = function(){ res(r.result); }; r.onerror = rej; r.readAsDataURL(blob); }); }
 function dataURLtoBlob(d){ var p = d.indexOf(','); var meta = d.slice(0, p), body = d.slice(p + 1); var mime = (meta.match(/data:([^;]+)/) || [])[1] || 'application/octet-stream'; var bin = atob(body); var arr = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return new Blob([arr], { type: mime }); }
 
@@ -384,6 +386,10 @@ function stopExport(save){
   if (!save) { chunks = []; refreshUI(); }
 }
 var exportedFile = null;
+function canShareFile(file){
+  try { return !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] })); }
+  catch(e) { return false; }
+}
 function shareExport(){
   var data = { files: [exportedFile] };
   navigator.share(data).catch(function(err){
@@ -406,11 +412,14 @@ function onExportDone(){
     return;
   }
   exportedFile = new File([blob], 'lina-' + Date.now() + '.' + ext, { type: ext === 'mp4' ? 'video/mp4' : 'video/webm' });
-  var canShareFile = false;
-  try { canShareFile = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [exportedFile] })); } catch(e) {}
-  $('#btnShareExport').hidden = !canShareFile;
+  var preview = $('#exportPreview');
+  if (preview.src) URL.revokeObjectURL(preview.src);
+  preview.src = URL.createObjectURL(exportedFile);
+  preview.hidden = false;
+  var supportsShare = canShareFile(exportedFile);
+  $('#btnShareExport').hidden = !supportsShare;
   $('#btnDownloadExport').hidden = false;
-  $('#exportStatus').textContent = canShareFile
+  $('#exportStatus').textContent = supportsShare
     ? 'Видео готово. Нажмите «Сохранить видео» и выберите действие в меню iPhone.'
     : 'Видео готово. Нажмите «Скачать файл» и проверьте папку загрузок.';
   if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.notificationOccurred('success'); } catch(e) {} }
@@ -639,6 +648,17 @@ $('#pbar').addEventListener('click', function(e){
 /* ---------- Events: экспорт и проект ---------- */
 $('#btnExport').addEventListener('click', exportVideo);
 $('#orient').addEventListener('change', function(){ state.orient = this.value; applyOrient(); });
+var projectFile = null;
+$('#btnSaveJson').addEventListener('click', function(){
+  if (!projectFile) return;
+  if (canShareFile(projectFile)) {
+    navigator.share({ files: [projectFile] }).catch(function(err){
+      if (err.name !== 'AbortError') notify('Меню сохранения недоступно для проекта.');
+    });
+  } else {
+    download(projectFile, projectFile.name);
+  }
+});
 $('#btnSave').addEventListener('click', function(){
   var bytes = state.media.reduce(function(a, m){ return a + (m.size || 0); }, 0);
   if (bytes > 190 * 1048576) notify('Внимание: исходники больше ~190 МБ, проект может не сохраниться. Не закрывайте вкладку!');
@@ -662,8 +682,9 @@ $('#btnSave').addEventListener('click', function(){
       music: r[1],
       media: r[0]
     };
-    download(new Blob([JSON.stringify(proj)], { type: 'application/json' }), 'lina-project-' + Date.now() + '.json');
-    notify('Проект сохранён. Не закрывайте вкладку до конца скачивания!');
+    projectFile = new File([JSON.stringify(proj)], 'lina-project-' + Date.now() + '.json', { type: 'application/json' });
+    $('#btnSaveJson').hidden = false;
+    notify('Проект готов. Нажмите «Получить проект JSON».');
   }).catch(function(){ notify('Не удалось собрать проект'); });
 });
 $('#btnOpen').addEventListener('click', function(){ $('#openProj').click(); });
