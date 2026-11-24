@@ -201,7 +201,9 @@ function drawPlaceholder(){
   ctx.fillText('Кадр недоступен', cw / 2, ch / 2);
 }
 function wrapText(text, maxW){
-  var words = String(text).split(/\s+/), lines = [], cur = '';
+  var paragraphs = String(text).split('\n');
+  if (paragraphs.length > 1) return paragraphs.flatMap(function(line){ return wrapText(line, maxW); });
+  var words = paragraphs[0].split(/\s+/), lines = [], cur = '';
   for (var i = 0; i < words.length; i++) {
     var t = cur ? cur + ' ' + words[i] : words[i];
     if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = words[i]; } else cur = t;
@@ -259,6 +261,10 @@ function drawFrame(t){
   }
   var s = hit.s, off = hit.off, local = s.start + (t - off) * s.speed;
   var m = mediaById(s.mediaId);
+  if (activeVideoEl && (!m || m.el !== activeVideoEl || m.broken)) {
+    activeVideoEl.pause();
+    activeVideoEl = null;
+  }
   if (m && !m.broken && m.el) {
     if (m.type === 'video') { syncVideo(m, local, s); if (m.el.readyState >= 2) drawCover(m.el); else drawPlaceholder(); }
     else { drawCover(m.el); }
@@ -284,15 +290,20 @@ function routeEl(el){
     try {
       el.__routed = true;
       var src = actx.createMediaElementSource(el);
-      src.connect(msDest);
-      src.connect(actx.destination);
+      var gain = actx.createGain();
+      gain.gain.value = el === musicElRef ? state.music.volume : 1;
+      src.connect(gain);
+      gain.connect(msDest);
+      gain.connect(actx.destination);
+      el.__gain = gain;
+      el.volume = 1;
     } catch(e) { el.__routed = false; }
   }
 }
 
 /* ---------- Playback ---------- */
 function startPlayback(){
-  if (exporting) return;
+  if (exporting || finishingExport || playing) return;
   var T = totalDur();
   if (!T) { notify('Добавьте хотя бы одну сцену'); return; }
   if (tcur >= T - 0.01) tcur = 0;
@@ -306,7 +317,7 @@ function startPlayback(){
 function stopPlayback(){
   playing = false;
   if (rafId) cancelAnimationFrame(rafId); rafId = 0;
-  state.media.forEach(function(m){ if (m.type === 'video' && !m.el.paused) m.el.pause(); });
+  state.media.forEach(function(m){ if (m.type === 'video' && m.el && !m.el.paused) m.el.pause(); });
   if (musicElRef) musicElRef.pause();
   activeVideoEl = null;
   refreshUI();
@@ -374,7 +385,7 @@ function stopExport(save){
   if (!exporting) return;
   exporting = false;
   if (rafId) cancelAnimationFrame(rafId); rafId = 0;
-  state.media.forEach(function(m){ if (m.type === 'video' && !m.el.paused) m.el.pause(); });
+  state.media.forEach(function(m){ if (m.type === 'video' && m.el && !m.el.paused) m.el.pause(); });
   if (musicElRef) musicElRef.pause();
   activeVideoEl = null;
   if (save && recorder && recorder.state !== 'inactive') {
@@ -438,12 +449,12 @@ function parseSRT(text){
     for (var j = 0; j < lines.length; j++) { if (tc.test(lines[j])) { li = j; break; } }
     if (li < 0) continue;
     var m = lines[li].match(tc);
-    var s = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000;
-    var e = (+m[5]) * 3600 + (+m[6]) * 60 + (+m[7]) + (+m[8]) / 1000;
+    var s = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + Number('0.' + m[4]);
+    var e = (+m[5]) * 3600 + (+m[6]) * 60 + (+m[7]) + Number('0.' + m[8]);
     var txt = lines.slice(li + 1).join('\n').trim();
-    if (txt) out.push({ start: s, end: e, text: txt });
+    if (txt && e > s) out.push({ start: s, end: e, text: txt });
   }
-  return out;
+  return out.sort(function(a,b){ return a.start - b.start; });
 }
 function srtBlock(s, i){
   function tc(x){
@@ -513,7 +524,11 @@ function refreshUI(){
   $('#ttot').textContent = fmt(totalDur());
   $('#srtCount').textContent = state.subs.length ? state.subs.length + ' субтитров' : '';
   $('#musicInfo').textContent = state.music ? ('🎵 ' + state.music.name) : 'Музыка не добавлена';
-  if (!exporting) updateTimer();
+  if (!playing && !exporting) {
+    tcur = Math.min(tcur, totalDur());
+    drawFrame(Math.max(0, tcur - (tcur === totalDur() ? 0.001 : 0)));
+    updateTimer();
+  }
   refreshMainButton();
 }
 
@@ -593,7 +608,13 @@ $('#sceneList').addEventListener('click', function(e){
 });
 $('#timeline').addEventListener('click', function(e){
   var seg = e.target.closest('.seg'); if (!seg) return;
-  state.selectedScene = seg.dataset.sid; refreshUI();
+  if (exporting || finishingExport) return;
+  stopPlayback();
+  state.selectedScene = seg.dataset.sid;
+  var index = state.scenes.findIndex(function(s){ return s.id === state.selectedScene; });
+  if (index < 0) return;
+  tcur = state.scenes.slice(0, index).reduce(function(sum, s){ return sum + sceneDur(s); }, 0);
+  refreshUI();
 });
 
 /* ---------- Events: субтитры ---------- */
@@ -618,6 +639,7 @@ $('#fileMusic').addEventListener('change', function(e){
   var f = e.target.files && e.target.files[0]; if (!f) return;
   var url = URL.createObjectURL(f);
   var a = new Audio(url); a.loop = true; a.preload = 'auto';
+  if (musicElRef) musicElRef.pause();
   musicElRef = a;
   state.music = { name: f.name, volume: (+$('#vol').value) / 100, data: null, file: f };
   a.volume = state.music.volume;
@@ -627,7 +649,8 @@ $('#fileMusic').addEventListener('change', function(e){
 $('#vol').addEventListener('input', function(){
   var v = (+this.value) / 100;
   $('#volVal').textContent = this.value;
-  if (musicElRef) musicElRef.volume = v;
+  if (musicElRef && musicElRef.__gain) musicElRef.__gain.gain.value = v;
+  else if (musicElRef) musicElRef.volume = v;
   if (state.music) state.music.volume = v;
 });
 
@@ -693,11 +716,11 @@ $('#openProj').addEventListener('change', function(e){
   f.text().then(function(txt){
     var proj;
     try { proj = JSON.parse(txt); } catch(err) { notify('Не удалось открыть проект: ' + err.message); return; }
-    if (proj.app !== 'lina-studio') { notify('Это не файл проекта Лины'); return; }
-    stopPlayback();
-    state.media = []; state.scenes = []; state.subs = []; state.music = null; musicElRef = null;
-    state.selectedMedia = null; state.selectedScene = null;
-    state.orient = proj.orient || '9:16';
+    if (!proj || proj.app !== 'lina-studio') { notify('Это не файл проекта Лины'); return; }
+    if (!Array.isArray(proj.media) || !Array.isArray(proj.scenes) || (proj.subs != null && !Array.isArray(proj.subs))) {
+      throw new Error('Некорректная структура проекта');
+    }
+    var musicBlob = proj.music && proj.music.data ? dataURLtoBlob(proj.music.data) : null;
     var mediaPromises = (proj.media || []).map(function(md){
       var p = Promise.resolve(null);
       if (md.data) {
@@ -721,13 +744,31 @@ $('#openProj').addEventListener('change', function(e){
       });
     });
     return Promise.all(mediaPromises).then(function(meds){
+      if (exporting || finishingExport) throw new Error('Дождитесь окончания экспорта');
+      var mediaIds = new Map();
+      meds.forEach(function(m){
+        var id = nid();
+        mediaIds.set(m.id, id);
+        m.id = id;
+      });
+      var scenes = proj.scenes.map(function(s){
+        var start = Number.isFinite(s.start) ? Math.max(0, s.start) : 0;
+        var end = Number.isFinite(s.end) && s.end > start ? s.end : start + 4;
+        var speed = Number.isFinite(s.speed) && s.speed > 0 ? s.speed : 1;
+        return { id: nid(), mediaId: mediaIds.get(s.mediaId), start: start, end: end, speed: speed, title: s.title || '' };
+      });
+      stopPlayback();
+      tcur = 0;
+      state.selectedMedia = null; state.selectedScene = null;
+      state.orient = proj.orient === '16:9' ? '16:9' : '9:16';
       state.media = meds;
-      state.scenes = (proj.scenes || []).map(function(s){ return { id: s.id || nid(), mediaId: s.mediaId, start: s.start || 0, end: s.end || 4, speed: s.speed || 1, title: s.title || '' }; });
+      state.scenes = scenes;
+      state.music = null; musicElRef = null;
       state.subs = proj.subs || [];
       if (proj.music) {
         state.music = { name: proj.music.name, volume: proj.music.volume != null ? proj.music.volume : 0.7, file: null, url: null };
-        if (proj.music.data) {
-          var mb = dataURLtoBlob(proj.music.data), murl = URL.createObjectURL(mb);
+        if (musicBlob) {
+          var murl = URL.createObjectURL(musicBlob);
           var a = new Audio(murl); a.loop = true; a.volume = state.music.volume;
           musicElRef = a; state.music.url = murl;
         }
