@@ -117,6 +117,12 @@ footer{max-width:980px; margin:0 auto; padding:0 14px 12px; font-size:12px; colo
       <summary>Субтитры</summary>
       <div>
         <input type="file" id="fileSrt" accept=".srt,.txt" hidden>
+        <label for="autoSubsLanguage">Язык речи в видео</label>
+        <select id="autoSubsLanguage">
+          <option value="russian">Русский</option>
+          <option value="english">Английский</option>
+          <option value="">Определить автоматически</option>
+        </select>
         <button id="btnAutoSubs" class="primary small">Распознать речь</button>
         <div id="autoSubsStatus" class="hint" role="status"></div>
         <button id="btnSrtLoad" class="small">Загрузить SRT-файл</button>
@@ -646,6 +652,16 @@ function sceneAudio(buffer, scene){
   }
   return mono;
 }
+function hasAudibleAudio(samples){
+  var blockSize = 1600;
+  for (var start = 0; start < samples.length; start += blockSize) {
+    var end = Math.min(start + blockSize, samples.length);
+    var power = 0;
+    for (var i = start; i < end; i++) power += samples[i] * samples[i];
+    if (power / (end - start) >= 0.0000001) return true;
+  }
+  return false;
+}
 function appendRecognizedCues(cues, chunks, scene, offset, audioDuration){
   var limit = Math.min(audioDuration, scene.end - scene.start);
   (chunks || []).forEach(function(chunk){
@@ -661,6 +677,7 @@ $('#btnAutoSubs').addEventListener('click', async function(){
   if (exporting || finishingExport) { status.textContent = 'Дождитесь окончания экспорта.'; return; }
   var snapshot = JSON.stringify(state.scenes);
   var originalDraft = $('#srtText').value;
+  var language = $('#autoSubsLanguage').value;
   var offset = 0;
   var clips = state.scenes.flatMap(function(scene){
     var media = mediaById(scene.mediaId);
@@ -691,18 +708,18 @@ $('#btnAutoSubs').addEventListener('click', async function(){
         }
       }
       var samples = sceneAudio(decoded, clip.scene);
-      if (!samples.length) continue;
+      if (!hasAudibleAudio(samples)) continue;
       if (!recognize) {
         status.textContent = 'Загружаю модель распознавания…';
         try { recognize = await loadRecognizer(); }
         catch(err) { throw new Error('Не удалось загрузить модель. Проверьте интернет и попробуйте снова.'); }
       }
       status.textContent = 'Распознаю речь: сцена ' + (i + 1) + ' из ' + clips.length + '…';
-      var result = await recognize(samples, { return_timestamps: true, chunk_length_s: 25, stride_length_s: 4, task: 'transcribe' });
+      var result = await recognize(samples, { return_timestamps: true, chunk_length_s: 25, stride_length_s: 4, task: 'transcribe', language: language || undefined });
       appendRecognizedCues(cues, result.chunks, clip.scene, clip.offset, samples.length / decoded.sampleRate);
     }
     if (!cues.length) { status.textContent = 'В видеосценах не удалось распознать речь.'; return; }
-    if (snapshot !== JSON.stringify(state.scenes) || originalDraft !== $('#srtText').value || exporting || finishingExport) {
+    if (snapshot !== JSON.stringify(state.scenes) || originalDraft !== $('#srtText').value || language !== $('#autoSubsLanguage').value || exporting || finishingExport) {
       status.textContent = 'Проект изменился. Запустите распознавание ещё раз.';
       return;
     }
